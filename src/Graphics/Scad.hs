@@ -2,7 +2,8 @@
 {-# LANGUAGE DataKinds #-}
 
 module Graphics.Scad
-  ( Dimension(..)
+  ( Facet
+  , Dimension(..)
   , V2(..)
   , V3(..)
   , Model
@@ -19,6 +20,8 @@ module Graphics.Scad
   , square'
   , rectangle
   , rectangle'
+  , convex
+  , polygon
   , sphere
   , cube
   , cube'
@@ -34,6 +37,7 @@ module Graphics.Scad
   , translate
   , rotate
   , rotate'
+  , rotate2d
   , scale
   , resize
   , mirror
@@ -72,42 +76,45 @@ tau = 2 * pi
 defaultFacet :: Facet
 defaultFacet = Facet {_fa = Nothing, _fs = Nothing, _fn = Nothing}
 
-render ::
-     (Pretty (V d Double), Pretty (V d Radian))
-  => Reader Facet (Model d)
-  -> Doc ann
+render :: (Pretty (Model d)) => Reader Facet (Model d) -> Doc ann
 render mdl = pretty $ runReader mdl defaultFacet
 
 
 circle :: (MonadReader Facet m) => Double -> m Shape
 circle r = Circle r <$> ask
 
-square :: (MonadReader Facet m) => Double -> m Shape
+square :: (Applicative m) => Double -> m Shape
 square r = pure (Square r True)
 
-square' :: (MonadReader Facet m) => Double -> m Shape
+square' :: (Applicative m) => Double -> m Shape
 square' r = pure (Square r False)
 
-rectangle :: (MonadReader Facet m) => V2 Double -> m Shape
+rectangle :: (Applicative m) => V2 Double -> m Shape
 rectangle r = pure (Rectangle r True)
 
-rectangle' :: (MonadReader Facet m) => V2 Double -> m Shape
+rectangle' :: (Applicative m) => V2 Double -> m Shape
 rectangle' r = pure (Rectangle r False)
+
+convex :: (Applicative m) => [V2 Double] -> m Shape
+convex vs = pure (Polygon vs [] Nothing)
+
+polygon :: (Applicative m) => [V2 Double] -> [[Int]] -> Maybe Int -> m Shape
+polygon vs ps c = pure (Polygon vs ps c)
 
 
 sphere :: (MonadReader Facet m) => Double -> m Form
 sphere r = Sphere r <$> ask
 
-cube :: (MonadReader Facet m) => Double -> m Form
+cube :: (Applicative m) => Double -> m Form
 cube r = pure (Cube r True)
 
-cube' :: (MonadReader Facet m) => Double -> m Form
+cube' :: (Applicative m) => Double -> m Form
 cube' r = pure (Cube r False)
 
-box :: (MonadReader Facet m) => V3 Double -> m Form
+box :: (Applicative m) => V3 Double -> m Form
 box r = pure (Box r True)
 
-box' :: (MonadReader Facet m) => V3 Double -> m Form
+box' :: (Applicative m) => V3 Double -> m Form
 box' r = pure (Box r False)
 
 cylinder :: (MonadReader Facet m) => Double -> Double -> m Form
@@ -123,52 +130,57 @@ cylinder2' :: (MonadReader Facet m) => Double -> (Double, Double) -> m Form
 cylinder2' h (r1, r2) = Cylinder2 h r1 r2 False <$> ask
 
 
-projection :: (MonadReader Facet m) => Bool -> m Form -> m Shape
+projection :: (Functor m) => Bool -> m Form -> m Shape
 projection c m = Projection c <$> m
 
-project :: (MonadReader Facet m) => m Form -> m Shape
+project :: (Functor m) => m Form -> m Shape
 project m = Projection False <$> m
 
-cut :: (MonadReader Facet m) => m Form -> m Shape
+cut :: (Functor m) => m Form -> m Shape
 cut m = Projection True <$> m
 
 
-translate :: (MonadReader Facet m) => V d Double -> m (Model d) -> m (Model d)
+translate :: (Functor m) => V d Double -> m (Model d) -> m (Model d)
 translate v mdl = Translate v <$> mdl
 
-rotate :: (MonadReader Facet m) => Double -> V d Double -> m (Model d) -> m (Model d)
+rotate ::
+     (Functor m)
+  => Double
+  -> V 'Three Double
+  -> m (Model 'Three)
+  -> m (Model 'Three)
 rotate a v mdl = RotateV (Radian a) v <$> mdl
 
 rotate' ::
-     (MonadReader Facet m, Functor (V d))
-  => V d Double
-  -> m (Model d)
-  -> m (Model d)
+     (Functor m) => V 'Three Double -> m (Model 'Three) -> m (Model 'Three)
 rotate' a mdl = RotateA (Radian <$> a) <$> mdl
 
-scale :: (MonadReader Facet m) => V d Double -> m (Model d) -> m (Model d)
+rotate2d :: (Functor m) => Double -> m (Model 'Two) -> m (Model 'Two)
+rotate2d a mdl = RotateA (Radian <$> V3 0 0 a) <$> mdl
+
+scale :: (Functor m) => V d Double -> m (Model d) -> m (Model d)
 scale v mdl = Scale v <$> mdl
 
-resize :: (MonadReader Facet m) => V d Double -> m (Model d) -> m (Model d)
+resize :: (Functor m) => V d Double -> m (Model d) -> m (Model d)
 resize v mdl = Resize v <$> mdl
 
-mirror :: (MonadReader Facet m) => V3 Double -> m Form -> m Form
+mirror :: (Functor m) => V d Double -> m (Model d) -> m (Model d)
 mirror v mdl = Mirror v <$> mdl
 
-hull :: (MonadReader Facet m) => [m (Model d)] -> m (Model d)
+hull :: (Applicative m) => [m (Model d)] -> m (Model d)
 hull ms = Hull <$> sequenceA ms
 
-minkowski :: (MonadReader Facet m) => [m (Model d)] -> m (Model d)
+minkowski :: (Applicative m) => [m (Model d)] -> m (Model d)
 minkowski ms = Minkowski <$> sequenceA ms
 
 
-union :: (MonadReader Facet m) => [m (Model d)] -> m (Model d)
+union :: (Applicative m) => [m (Model d)] -> m (Model d)
 union ms = getUnion . mconcat $ fmap Union ms
 
-intersection :: (MonadReader Facet m) => [m (Model d)] -> m (Model d)
+intersection :: (Applicative m) => [m (Model d)] -> m (Model d)
 intersection ms = getIntersection . mconcat $ fmap Intersection ms
 
-difference :: (MonadReader Facet m) => m (Model d) -> [m (Model d)] -> m (Model d)
+difference :: (Applicative m) => m (Model d) -> [m (Model d)] -> m (Model d)
 difference x ys = liftA2 Difference x (union ys)
 
 

@@ -11,7 +11,11 @@ module Graphics.Scad.Types
   , Facet(..)
   , Dimension(..)
   , V
+  , OffsetMode(..)
   , Model(..)
+  , Module(..)
+  , SomeModel(..)
+  , IsSomeModel(..)
   ) where
 
 import Graphics.Scad.Orphan ()
@@ -23,7 +27,7 @@ import Data.Text.Prettyprint.Doc
 import Data.Text (Text)
 
 newtype Radian = Radian Double
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 instance Pretty Radian where
   pretty (Radian r) = pretty (180 * r / pi)
@@ -34,14 +38,19 @@ data Facet =
     , _fs :: Maybe Double
     , _fn :: Maybe Double
     }
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data Dimension = Two | Three
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 type family V d where
   V 'Two = V2
   V 'Three = V3
+
+data OffsetMode
+  = OffsetR Double
+  | OffsetDelta Double
+  deriving (Show, Eq, Ord)
 
 data Model d where
   Zero :: Model d
@@ -57,17 +66,17 @@ data Model d where
   Box :: V3 Double -> Bool -> Model 'Three
   Cylinder :: Double -> Double -> Bool -> Facet -> Model 'Three
   Cylinder2 :: Double -> Double -> Double -> Bool -> Facet -> Model 'Three
+  LinearExtrude :: Double -> Bool -> Int -> Radian -> Facet -> Model 'Two -> Model 'Three
 
   Projection :: Bool -> Model 'Three -> Model 'Two
-  OffsetR :: Double -> Bool -> (Model 'Two) -> Model 'Two
-  OffsetDelta :: Double -> Bool -> (Model 'Two) -> Model 'Two
+  Offset :: OffsetMode -> Bool -> Model 'Two -> Model 'Two
 
-  Translate :: (V d Double) -> (Model d) -> Model d
-  RotateA :: (V 'Three Radian) -> (Model d) -> Model d
-  RotateV :: Radian -> (V 'Three Double) -> (Model d) -> Model d
-  Scale :: (V d Double) -> (Model d) -> Model d
-  Resize :: (V d Double) -> (Model d) -> Model d
-  Mirror :: (V d Double) -> (Model d) -> Model d
+  Translate :: V d Double -> Model d -> Model d
+  RotateA :: V 'Three Radian -> Model d -> Model d
+  RotateV :: Radian -> V 'Three Double -> (Model d) -> Model d
+  Scale :: V d Double -> Model d -> Model d
+  Resize :: V d Double -> Model d -> Model d
+  Mirror :: V d Double -> Model d -> Model d
   Hull :: [Model d] -> Model d
   Minkowski :: [Model d] -> Model d
 
@@ -75,9 +84,24 @@ data Model d where
   Intersection' :: [Model d] -> Model d
   Difference :: Model d -> Model d -> Model d
 
+  Apply2 :: Text -> Model 'Two -> Model d
+  Apply3 :: Text -> Model 'Three -> Model d
+  Children :: Model d
+  ModelList :: [Model d] -> Model d
+
 deriving instance Show (Model 'Two)
 deriving instance Show (Model 'Three)
 
+deriving instance Eq (Model 'Two)
+deriving instance Eq (Model 'Three)
+
+deriving instance Ord (Model 'Two)
+deriving instance Ord (Model 'Three)
+
+data Module where
+  Module2 :: Text -> Model 'Two -> Module
+  Module3 :: Text -> Model 'Three -> Module
+  deriving (Show, Eq, Ord)
 
 ppFacets :: Facet -> [Doc ann]
 ppFacets f =
@@ -92,7 +116,6 @@ ppBool True = "true"
 ppBool False = "false"
 
 block :: (Pretty (Model d)) => [Model d] -> Doc ann
-block [Union' xs] = block xs
 block xs = vcat [nest 2 (vcat (lbrace : fmap pretty xs)), rbrace]
 
 named :: (Pretty a) => Doc ann -> a -> Doc ann
@@ -109,17 +132,21 @@ instance Pretty (Model 'Two) where
   pretty Zero = error "cannot render Zero"
   pretty One = error "cannot render One"
 
-  pretty (Circle r f) = "circle" <> tupled (pretty r : ppFacets f) <> ";"
-  pretty (Square r c) = "square" <> tupled (pretty r : [center c]) <> ";"
-  pretty (Rectangle r c) = "square" <> tupled (pretty r : [center c]) <> ";"
+  pretty (Circle r f) =
+    "circle" <> align (tupled (pretty r : ppFacets f)) <> ";"
+  pretty (Square r c) =
+    "square" <> align (tupled (pretty r : [center c])) <> ";"
+  pretty (Rectangle r c) =
+    "square" <> align (tupled (pretty r : [center c])) <> ";"
   pretty (Polygon vs [] c) =
-    "polygon" <> tupled (align (list (fmap pretty vs)) : named' "convexity" c) <>
-    ";"
+    "polygon" <>
+    align (tupled (align (list (fmap pretty vs)) : named' "convexity" c) <> ";")
   pretty (Polygon vs [p] c) =
     "polygon" <>
-    tupled
-      (align (list (fmap pretty vs)) : named "paths" p : named' "convexity" c) <>
-    ";"
+    align
+      (tupled
+         (align (list (fmap pretty vs)) : named "paths" p : named' "convexity" c) <>
+       ";")
   pretty (Polygon vs ps c) =
     "polygon" <>
     tupled
@@ -127,10 +154,11 @@ instance Pretty (Model 'Two) where
     ";"
 
   pretty (Projection c m) = "projection" <> parens (named "cut" c) <+> block [m]
-  pretty (OffsetR r c m) =
-    "offset" <> tupled [named "r" r, named "chamfer" (ppBool c)] <+> block [m]
-  pretty (OffsetDelta d c m) =
-    "offset" <> tupled [named "delta" d, named "chamfer" (ppBool c)] <+>
+  pretty (Offset (OffsetR r) c m) =
+    "offset" <> align (tupled [named "r" r, named "chamfer" (ppBool c)]) <+>
+    block [m]
+  pretty (Offset (OffsetDelta d) c m) =
+    "offset" <> align (tupled [named "delta" d, named "chamfer" (ppBool c)]) <+>
     block [m]
 
   pretty (Translate v m) = "translate" <> parens (pretty v) <+> block [m]
@@ -139,42 +167,85 @@ instance Pretty (Model 'Two) where
     "rotate" <> parens (list [named "a" a, named "v" v]) <+> block [m]
   pretty (Scale v m) = "scale" <> parens (pretty v) <+> block [m]
   pretty (Resize v m) = "resize" <> parens (pretty v) <+> block [m]
-  pretty (Mirror (V2 x y) m) = "mirror" <> parens (pretty (V3 x y 0)) <+> block [m]
-  pretty (Hull ms) = "hull()"  <+> block ms
-  pretty (Minkowski ms) = "minkowski()"  <+> block ms
+  pretty (Mirror (V2 x y) m) =
+    "mirror" <> parens (pretty (V3 x y 0)) <+> block [m]
+  pretty (Hull ms) = "hull()" <+> block ms
+  pretty (Minkowski ms) = "minkowski()" <+> block ms
 
   pretty (Union' xs) = "union()" <+> block xs
   pretty (Intersection' xs) = "intersection()" <+> block xs
   pretty (Difference x (Union' ys)) = "difference()" <+> block (x : ys)
   pretty (Difference x y) = "difference()" <+> block [x, y]
+
+  pretty (Apply2 n m) = pretty n <> "()" <+> block [m]
+  pretty (Apply3 n m) = pretty n <> "()" <+> block [m]
+  pretty Children = "children();"
+  pretty (ModelList ms) = vcat (fmap pretty ms)
+
 
 instance Pretty (Model 'Three) where
   pretty Zero = error "cannot render Zero"
   pretty One = error "cannot render One"
 
-  pretty (Sphere r f) = "sphere" <> tupled (pretty r : ppFacets f) <> ";"
-  pretty (Cube r c) = "cube" <> tupled (pretty r : [center c]) <> ";"
-  pretty (Box r c) = "cube" <> tupled (pretty r : [center c]) <> ";"
+  pretty (Sphere r f) =
+    "sphere" <> align (tupled (pretty r : ppFacets f)) <> ";"
+  pretty (Cube r c) = "cube" <> align (tupled (pretty r : [center c])) <> ";"
+  pretty (Box r c) = "cube" <> align (tupled (pretty r : [center c])) <> ";"
   pretty (Cylinder h r c f) =
-    "cylinder" <> tupled ((named "h" h) : (named "r" r) : center c : ppFacets f) <>
-    ";"
+    "cylinder" <>
+    align
+      (tupled ((named "h" h) : (named "r" r) : center c : ppFacets f) <> ";")
   pretty (Cylinder2 h r1 r2 c f) =
     "cylinder" <>
-    tupled
-      ((named "h" h) : (named "r1" r1) : (named "r2" r2) : center c : ppFacets f) <>
-    ";"
+    align
+      (tupled
+         ((named "h" h) :
+          (named "r1" r1) : (named "r2" r2) : center c : ppFacets f) <>
+       ";")
+
+  pretty (LinearExtrude h c v t f m) =
+    "linear_extrude" <>
+    align
+      (tupled
+         (named "height" h :
+          named "center" (ppBool c) :
+          named "convexity" v : named "twist" t : ppFacets f)) <+>
+    block [m]
 
   pretty (Translate v m) = "translate" <> parens (pretty v) <+> block [m]
   pretty (RotateA a m) = "rotate" <> parens (named "a" a) <+> block [m]
   pretty (RotateV a v m) =
-    "rotate" <> parens (list [named "a" a, named "v" v]) <+> block [m]
+    "rotate" <> tupled [named "a" a, named "v" v] <+> block [m]
   pretty (Scale v m) = "scale" <> parens (pretty v) <+> block [m]
   pretty (Resize v m) = "resize" <> parens (pretty v) <+> block [m]
   pretty (Mirror v m) = "mirror" <> parens (pretty v) <+> block [m]
-  pretty (Hull ms) = "hull()"  <+> block ms
-  pretty (Minkowski ms) = "minkowski()"  <+> block ms
+  pretty (Hull ms) = "hull()" <+> block ms
+  pretty (Minkowski ms) = "minkowski()" <+> block ms
 
   pretty (Union' xs) = "union()" <+> block xs
   pretty (Intersection' xs) = "intersection()" <+> block xs
   pretty (Difference x (Union' ys)) = "difference()" <+> block (x : ys)
   pretty (Difference x y) = "difference()" <+> block [x, y]
+
+  pretty (Apply2 n m) = pretty n <> "()" <+> block [m]
+  pretty (Apply3 n m) = pretty n <> "()" <+> block [m]
+  pretty Children = "children();"
+  pretty (ModelList ms) = vcat (fmap pretty ms)
+
+
+instance Pretty Module where
+  pretty (Module2 n m) = "module" <+> pretty n <> "()" <+> block [m]
+  pretty (Module3 n m) = "module" <+> pretty n <> "()" <+> block [m]
+
+
+data SomeModel = Model2 (Model 'Two) |  Model3 (Model 'Three)
+  deriving (Show, Eq, Ord)
+
+class IsSomeModel a where
+  someModel :: a -> SomeModel
+
+instance IsSomeModel (Model 'Two) where
+  someModel = Model2
+
+instance IsSomeModel (Model 'Three) where
+  someModel = Model3

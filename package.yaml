@@ -21,12 +21,13 @@ description:         Please see the README on GitHub at <https://github.com/farr
 
 dependencies:
 - base >= 4.7 && < 5
+- containers
 - linear
-- mtl
+- polysemy
+- polysemy-plugin
 - prettyprinter
 - protolude
 - text
-- transformers
 
 library:
   source-dirs: src

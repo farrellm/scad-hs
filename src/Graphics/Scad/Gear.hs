@@ -1,6 +1,8 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
-
+{-# LANGUAGE GADTs #-}
 
 module Graphics.Scad.Gear
   ( Involute(..)
@@ -11,8 +13,11 @@ module Graphics.Scad.Gear
   ) where
 import Graphics.Scad
 
-import Control.Monad.Reader
-import Debug.Trace
+import Data.Map (Map)
+import Data.Text (Text)
+import Polysemy
+import Polysemy.Reader
+import Polysemy.State
 
 data Involute =
   Involute
@@ -34,14 +39,6 @@ data Planetary =
     }
   deriving (Show)
 
--- infixl 7 `rmod`
--- rmod :: (RealFrac a) => a -> a -> a
--- rmod n d =
---   let (_ :: Int, f) = properFraction (n / d)
---    in if f >= 0
---         then f * d
---         else f * d + d
-
 invol :: Double -> Double
 invol alpha = tan alpha - alpha
 
@@ -51,7 +48,7 @@ baseRadius i rPitch = cos (pressureAngle i) * rPitch
 involute :: Involute -> Double -> [V2 Double]
 involute i rPitch =
   let rBase = baseRadius i rPitch
-      minR = rBase -- rPitch - dedendum i
+      minR = rBase
       maxR = rPitch + addendum i
       dR = (maxR - minR) / fromIntegral (nSegment i)
       rs = [minR + fromIntegral j * dR | j <- [0 .. nSegment i]]
@@ -60,70 +57,101 @@ involute i rPitch =
       ys = [r * sin (invol a) | (r, a) <- zip rs as]
    in zipWith V2 xs ys
 
-tooth :: (Applicative m) => Involute -> Double -> m Shape
+tooth ::
+     (Member (Reader Facet) r, Member (State (Map SomeModel Text)) r)
+  => Involute
+  -> Double
+  -> Sem r Shape
 tooth i rPitch =
   let rBase = baseRadius i rPitch
       alphaRef = invol (acos (rBase / rPitch))
       c = convex (involute i rPitch)
       c' = rotate2d (-alphaRef) c
-      r = mirror (V2 0 1) c'
       pitch = pi * module' i
       theta = pitch / rPitch / 2
-   in hull [c', rotate2d theta r]
+   in hull [smodule [children, rotate2d theta $ mirror (V2 0 1) children] c']
 
-gear :: (MonadReader Facet m) => Involute -> Double -> m Shape
+gear ::
+     (Member (Reader Facet) r, Member (State (Map SomeModel Text)) r)
+  => Involute
+  -> Double
+  -> Sem r Shape
 gear i rPitch =
   let pitch = pi * module' i
       theta = pitch / rPitch
       t = tooth i rPitch
-      ts = [rotate2d (theta * n) t | n <- [0 .. 2 * rPitch / module' i - 1]]
-   in union ts <+> circle (rPitch - dedendum i)
+   in circle (rPitch - dedendum i) <+>
+      smodule
+        [rotate2d (theta * n) children | n <- [0 .. 2 * rPitch / module' i - 1]]
+        t
 
-r2d :: Double -> Double
-r2d r = 360 * r / tau
-
-planetary :: (MonadReader Facet m) => Involute -> Planetary -> Double -> m Form
+planetary ::
+     (Member (Reader Facet) r, Member (State (Map SomeModel Text)) r)
+  => Involute
+  -> Planetary
+  -> Double
+  -> Sem r Form
 planetary i p height =
-  let rRing = rSun p + 2 * rPlanet p
-      pitch = pi * module' i
-      -- beta: the angle of omega per tooth cycle
-      betaRing = pitch / rRing
-      betaSun = pitch / rSun p -- betaPlanet == betaSun since meshed
-      dRing_dOmega = 1 / betaRing
-      dSun_dOmega = 1 / betaSun
-      theta = pitch / rPlanet p
-      sun = gear i (rSun p)
-      parity =
-        if round (2 * rPlanet p / module' i) `mod` 2 == 0
-          then 0
-          else 0.5
-      planet =
-        \omega ->
-          let (_ :: Int, phaseRing) = properFraction (omega / betaRing)
-              (_ :: Int, phasePlnt) = properFraction (parity - omega / betaSun)
-              phasePlnt' =
-                if phasePlnt < 0
-                  then phasePlnt + 1
-                  else phasePlnt
-              delta =
-                (1) * (phasePlnt' - phaseRing) / (dRing_dOmega + dSun_dOmega)
-              omega' = omega + 1 * delta
-           in traceShow
-                (r2d omega, phaseRing, phasePlnt', r2d delta, r2d omega') $
-              rotate' (V3 0 0 omega') .
-              translate (V3 (rPlanet p + rSun p) 0 0) .
-              linearExtrude height False 10 (-height / rPlanet p) .
-              rotate2d ((theta / 2) + (omega' * rSun p / rPlanet p)) .
-              mirror (V2 1 0) $
-              offsetR (- planetOffset p) False $
-              gear i (rPlanet p)
+  let sun = gear i (rSun p)
       i' = i {addendum = dedendum i, dedendum = addendum i}
       ring = circle (rOuter p) <-> gear i' rRing
-      half =
-        union
-          (linearExtrude height False 10 (-height / rRing) ring :
-           linearExtrude height False 10 (height / rSun p) sun :
-           [ planet (tau / fromIntegral (nPlanet p) * fromIntegral n)
-           | n <- [0 .. (nPlanet p) - 1]
-           ])
-   in half <+> mirror (V3 0 0 1) half
+   in list
+        (herringbone (-1) rRing ring :
+         herringbone (1) (rSun p) sun :
+         [ smodule
+             [ planet (tau / fromIntegral (nPlanet p) * fromIntegral n)
+             | n <- [0 .. (nPlanet p) - 1]
+             ]
+             (mirror (V2 1 0) . offsetR (-planetOffset p) False $
+              gear i (rPlanet p))
+         ])
+  where
+    rRing = rSun p + 2 * rPlanet p
+
+    parity :: Double
+    parity =
+      if round (2 * rPlanet p / module' i) `mod` 2 == (0 :: Int)
+        then 0
+        else 0.5
+
+    planet ::
+         ( Member (Reader Facet) r
+         , Member (State (Map SomeModel Text)) r
+         , Member (HasChildren 'Two) r
+         )
+      => Double
+      -> Sem r Form
+    planet omega =
+      let pitch = pi * module' i
+            -- beta: the angle of omega per tooth cycle
+          betaRing = pitch / rRing
+          betaSun = pitch / rSun p -- betaPlanet == betaSun since meshed
+          dRing_dOmega = 1 / betaRing
+          dSun_dOmega = 1 / betaSun
+          theta = pitch / rPlanet p
+          (_ :: Int, phaseRing) = properFraction (omega / betaRing)
+          (_ :: Int, phasePlnt) = properFraction (parity - omega / betaSun)
+          phasePlnt' =
+            if phasePlnt < 0
+              then phasePlnt + 1
+              else phasePlnt
+          delta = (1) * (phasePlnt' - phaseRing) / (dRing_dOmega + dSun_dOmega)
+          omega' = omega + 1 * delta
+       in rotate' (V3 0 0 omega') .
+          translate (V3 (rPlanet p + rSun p) 0 0) .
+          herringbone (-1) (rPlanet p) .
+          rotate2d ((theta / 2) + (omega' * rSun p / rPlanet p)) $
+          children
+
+    herringbone ::
+         (Member (Reader Facet) r, Member (State (Map SomeModel Text)) r)
+      => Double
+      -> Double
+      -> Sem r Shape
+      -> Sem r Form
+    herringbone sgn r m =
+      let eps = 1e-6
+          height' = height + eps
+       in smodule [children <+> mirror (V3 0 0 1) children] .
+          translate (V3 0 0 (-eps / 2)) $
+          linearExtrude (0.5 * height') False 10 (0.5 * sgn * height' / r) m

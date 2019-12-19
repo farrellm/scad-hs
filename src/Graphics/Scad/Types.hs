@@ -53,9 +53,6 @@ data OffsetMode
   deriving (Show, Eq, Ord)
 
 data Model d where
-  Zero :: Model d
-  One :: Model d
-
   Circle :: Double -> Facet -> Model 'Two
   Square :: Double -> Bool -> Model 'Two
   Rectangle :: V2 Double -> Bool -> Model 'Two
@@ -128,9 +125,6 @@ center :: Bool -> Doc ann
 center = named "center" . ppBool
 
 instance Pretty (Model 'Two) where
-  pretty Zero = error "cannot render Zero"
-  pretty One = error "cannot render One"
-
   pretty (Circle r f) =
     "circle" <> align (tupled (pretty r : ppFacets f)) <> ";"
   pretty (Square r c) =
@@ -182,9 +176,6 @@ instance Pretty (Model 'Two) where
 
 
 instance Pretty (Model 'Three) where
-  pretty Zero = error "cannot render Zero"
-  pretty One = error "cannot render One"
-
   pretty (Sphere r f) =
     "sphere" <> align (tupled (pretty r : ppFacets f)) <> ";"
   pretty (Cube r c) = "cube" <> align (tupled (pretty r : [center c])) <> ";"

@@ -87,7 +87,6 @@ data Model d where
   Apply2 :: Text -> Model 'Two -> Model d
   Apply3 :: Text -> Model 'Three -> Model d
   Children :: Model d
-  ModelList :: [Model d] -> Model d
 
 deriving instance Show (Model 'Two)
 deriving instance Show (Model 'Three)
@@ -180,7 +179,6 @@ instance Pretty (Model 'Two) where
   pretty (Apply2 n m) = pretty n <> "()" <+> block [m]
   pretty (Apply3 n m) = pretty n <> "()" <+> block [m]
   pretty Children = "children();"
-  pretty (ModelList ms) = vcat (fmap pretty ms)
 
 
 instance Pretty (Model 'Three) where
@@ -230,7 +228,6 @@ instance Pretty (Model 'Three) where
   pretty (Apply2 n m) = pretty n <> "()" <+> block [m]
   pretty (Apply3 n m) = pretty n <> "()" <+> block [m]
   pretty Children = "children();"
-  pretty (ModelList ms) = vcat (fmap pretty ms)
 
 
 instance Pretty Module where

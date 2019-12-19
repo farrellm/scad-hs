@@ -65,7 +65,6 @@ module Graphics.Scad
   , union
   , intersection
   , difference
-  , list
   , fa
   , fs
   , fn
@@ -228,9 +227,6 @@ intersection ms = getIntersection . mconcat $ fmap Intersection ms
 difference :: (Applicative m) => m (Model d) -> [m (Model d)] -> m (Model d)
 difference x ys = liftA2 Difference x (union ys)
 
-list :: (Applicative m) => [m (Model d)] -> m (Model d)
-list ms = ModelList <$> sequenceA ms
-
 
 fa :: (Member (Reader Facet) r) => Double -> Sem r (Model d) -> Sem r (Model d)
 fa x mdl = local (\f -> f {_fa = Just x}) mdl
@@ -264,11 +260,11 @@ instance Apply 'Three where
 
 smodule ::
      (IsSomeModel (Model e), Apply d, Member (State (Map SomeModel Text)) r)
-  => [Sem (HasChildren d ': r) (Model e)]
+  => Sem (HasChildren d ': r) (Model e)
   -> Sem r (Model d)
   -> Sem r (Model e)
 smodule b c = do
-  b' <- someModel <$> runChildren c (list b)
+  b' <- someModel <$> runChildren c b
   mName <- M.lookup b' <$> get
   name <-
     case mName of

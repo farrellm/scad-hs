@@ -15,6 +15,7 @@ module Graphics.Scad.Types
   , Model(..)
   , Module(..)
   , SomeModel(..)
+  , SomeModels(..)
   , IsSomeModel(..)
   ) where
 
@@ -95,8 +96,8 @@ deriving instance Ord (Model 'Two)
 deriving instance Ord (Model 'Three)
 
 data Module where
-  Module2 :: Text -> Model 'Two -> Module
-  Module3 :: Text -> Model 'Three -> Module
+  Module2 :: Text -> [Model 'Two] -> Module
+  Module3 :: Text -> [Model 'Three] -> Module
   deriving (Show, Eq, Ord)
 
 ppFacets :: Facet -> [Doc ann]
@@ -222,18 +223,28 @@ instance Pretty (Model 'Three) where
 
 
 instance Pretty Module where
-  pretty (Module2 n m) = "module" <+> pretty n <> "()" <+> block [m]
-  pretty (Module3 n m) = "module" <+> pretty n <> "()" <+> block [m]
+  pretty (Module2 n m) = "module" <+> pretty n <> "()" <+> block m
+  pretty (Module3 n m) = "module" <+> pretty n <> "()" <+> block m
 
 
-data SomeModel = Model2 (Model 'Two) |  Model3 (Model 'Three)
+data SomeModel
+  = Model2 (Model 'Two)
+  | Model3 (Model 'Three)
+  deriving (Show, Eq, Ord)
+
+data SomeModels
+  = Models2 [Model 'Two]
+  | Models3 [Model 'Three]
   deriving (Show, Eq, Ord)
 
 class IsSomeModel a where
   someModel :: a -> SomeModel
+  someModels :: [a] -> SomeModels
 
 instance IsSomeModel (Model 'Two) where
   someModel = Model2
+  someModels = Models2
 
 instance IsSomeModel (Model 'Three) where
   someModel = Model3
+  someModels = Models3

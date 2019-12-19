@@ -1,9 +1,9 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
-
-{-# LANGUAGE MultiParamTypeClasses #-}
 
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -30,6 +30,7 @@ module Graphics.Scad
   , Union(..)
   , Intersection(..)
   , HasChildren
+  , HasScad
   , tau
   , circle
   , square
@@ -69,6 +70,8 @@ module Graphics.Scad
   , fs
   , fn
   , smodule
+  , (##)
+  , (#)
   , children
   , render
   , defaultFacet
@@ -94,9 +97,14 @@ import Polysemy.State
 type Shape = Model 'Two
 type Form = Model 'Three
 
-type Model' d = Sem '[Reader Facet, State (Map SomeModel Text)] (Model d)
+type Model' d = Sem '[Reader Facet, State (Map SomeModels Text)] (Model d)
 type Shape' = Model' 'Two
 type Form' = Model' 'Three
+
+type HasScad r =
+  ( Member (Reader Facet) r
+  , Member (State (Map SomeModels Text)) r
+  )
 
 
 tau :: Floating a => a
@@ -108,11 +116,11 @@ defaultFacet = Facet {_fa = Nothing, _fs = Nothing, _fn = Nothing}
 render :: (Pretty (Model d)) => Model' d -> Doc ann
 render mdl =
   let (ts, m) = run . runState mempty $ runReader defaultFacet mdl
-      ts' = fmap mkMod $ M.toList ts
+      ts' = mkMod <$> M.toList ts
    in vcat (fmap pretty ts' <> [pretty m])
   where
-    mkMod (Model2 m, n) = Module2 n m
-    mkMod (Model3 m, n) = Module3 n m
+    mkMod (Models2 m, n) = Module2 n m
+    mkMod (Models3 m, n) = Module3 n m
 
 
 circle :: (Member (Reader Facet) r) => Double -> Sem r Shape
@@ -259,12 +267,12 @@ instance Apply 'Three where
   apply = Apply3
 
 smodule ::
-     (IsSomeModel (Model e), Apply d, Member (State (Map SomeModel Text)) r)
-  => Sem (HasChildren d ': r) (Model e)
+     (IsSomeModel (Model e), Apply d, Member (State (Map SomeModels Text)) r)
+  => [Sem (HasChildren d ': r) (Model e)]
   -> Sem r (Model d)
   -> Sem r (Model e)
 smodule b c = do
-  b' <- someModel <$> runChildren c b
+  b' <- someModels <$> traverse (runChildren c) b
   mName <- M.lookup b' <$> get
   name <-
     case mName of
@@ -275,3 +283,19 @@ smodule b c = do
         pure n
       Just n -> pure n
   apply name <$> c
+
+infixr 1 ##
+(##) ::
+     (IsSomeModel (Model e), Apply d, Member (State (Map SomeModels Text)) r)
+  => (Sem (HasChildren d ': r) (Model d) -> [Sem (HasChildren d ': r) (Model e)])
+  -> Sem r (Model d)
+  -> Sem r (Model e)
+f ## c = smodule (f children) c
+
+infixr 1 #
+(#) ::
+     (IsSomeModel (Model e), Apply d, Member (State (Map SomeModels Text)) r)
+  => (Sem (HasChildren d ': r) (Model d) -> Sem (HasChildren d ': r) (Model e))
+  -> Sem r (Model d)
+  -> Sem r (Model e)
+f # c = (\x -> [f x]) ## c

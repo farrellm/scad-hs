@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -93,9 +94,9 @@ planetary i p height =
         let (_ :: Int, phaseRing) = properFraction (omega / betaRing)
             (_ :: Int, phasePlnt) = properFraction (parity - omega / betaSun)
             phasePlnt' =
-              if phasePlnt < 0
-                then phasePlnt + 1
-                else phasePlnt
+              if | phasePlnt < -0.5 -> phasePlnt + 1
+                 | phasePlnt >= 0.5 -> phasePlnt - 1
+                 | otherwise -> phasePlnt
             delta = (phasePlnt' - phaseRing) / (dRing_dOmega + dSun_dOmega)
             omega' = omega + 1 * delta
          in rotate' (V3 0 0 omega') .

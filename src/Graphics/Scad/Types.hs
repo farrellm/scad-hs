@@ -38,6 +38,7 @@ data Facet =
     { _fa :: Maybe Double
     , _fs :: Maybe Double
     , _fn :: Maybe Double
+    , _slices :: Maybe Int
     }
   deriving (Show, Eq, Ord)
 
@@ -64,7 +65,8 @@ data Model d where
   Box :: V3 Double -> Bool -> Model 'Three
   Cylinder :: Double -> Double -> Bool -> Facet -> Model 'Three
   Cylinder2 :: Double -> Double -> Double -> Bool -> Facet -> Model 'Three
-  LinearExtrude :: Double -> Bool -> Int -> Radian -> Facet -> Model 'Two -> Model 'Three
+  LinearExtrude ::
+    Double -> Bool -> Int -> Radian -> Facet -> Model 'Two -> Model 'Three
 
   Projection :: Bool -> Model 'Three -> Model 'Two
   Offset :: OffsetMode -> Bool -> Model 'Two -> Model 'Two
@@ -183,14 +185,12 @@ instance Pretty (Model 'Three) where
   pretty (Box r c) = "cube" <> align (tupled (pretty r : [center c])) <> ";"
   pretty (Cylinder h r c f) =
     "cylinder" <>
-    align
-      (tupled ((named "h" h) : (named "r" r) : center c : ppFacets f) <> ";")
+    align (tupled (named "h" h : named "r" r : center c : ppFacets f) <> ";")
   pretty (Cylinder2 h r1 r2 c f) =
     "cylinder" <>
     align
       (tupled
-         ((named "h" h) :
-          (named "r1" r1) : (named "r2" r2) : center c : ppFacets f) <>
+         (named "h" h : named "r1" r1 : named "r2" r2 : center c : ppFacets f) <>
        ";")
 
   pretty (LinearExtrude h c v t f m) =
@@ -199,7 +199,10 @@ instance Pretty (Model 'Three) where
       (tupled
          (named "height" h :
           named "center" (ppBool c) :
-          named "convexity" v : named "twist" t : ppFacets f)) <+>
+          named "convexity" v :
+          named "twist" t :
+          named' "slices" (_slices f) <>
+          ppFacets f)) <+>
     block [m]
 
   pretty (Translate v m) = "translate" <> parens (pretty v) <+> block [m]

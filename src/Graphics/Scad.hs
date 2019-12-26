@@ -20,7 +20,6 @@ module Graphics.Scad
   , V2(..)
   , V3(..)
   , Model
-  , SomeModel
   , Module
   , Shape
   , Form
@@ -29,9 +28,10 @@ module Graphics.Scad
   , SetLike(..)
   , Union(..)
   , Intersection(..)
-  , HasChildren
   , HasScad
   , tau
+  , defaultFacet
+  , render
   , circle
   , square
   , square'
@@ -69,13 +69,9 @@ module Graphics.Scad
   , fa
   , fs
   , fn
-  , smodule
+  , slices
   , (##)
   , (#)
-  , children
-  , render
-  , defaultFacet
-  , someModel
   ) where
 
 import Graphics.Scad.Types
@@ -111,7 +107,8 @@ tau :: Floating a => a
 tau = 2 * pi
 
 defaultFacet :: Facet
-defaultFacet = Facet {_fa = Nothing, _fs = Nothing, _fn = Nothing}
+defaultFacet =
+  Facet {_fa = Nothing, _fs = Nothing, _fn = Nothing, _slices = Nothing}
 
 render :: (Pretty (Model d)) => Model' d -> Doc ann
 render mdl =
@@ -244,6 +241,9 @@ fs x mdl = local (\f -> f {_fs = Just x}) mdl
 
 fn :: (Member (Reader Facet) r) => Double -> Sem r (Model d) -> Sem r (Model d)
 fn x mdl = local (\f -> f {_fn = Just x}) mdl
+
+slices :: (Member (Reader Facet) r) => Int -> Sem r (Model d) -> Sem r (Model d)
+slices x mdl = local (\f -> f {_slices = Just x}) mdl
 
 
 data HasChildren (d :: Dimension) m a where

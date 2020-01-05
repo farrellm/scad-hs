@@ -1,39 +1,40 @@
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Graphics.Scad.Gear
-  ( Involute(..)
-  , Planetary(..)
-  , tooth
-  , gear
-  , planetary
-  ) where
+  ( Involute (..),
+    Planetary (..),
+    tooth,
+    gear,
+    planetary,
+  )
+where
 
 import Graphics.Scad
 import Polysemy
 
-data Involute =
-  Involute
-    { pressureAngle :: Double
-    , module' :: Double
-    , addendum :: Double
-    , dedendum :: Double
-    , nSegment :: Int
-    }
+data Involute
+  = Involute
+      { pressureAngle :: Double,
+        module' :: Double,
+        addendum :: Double,
+        dedendum :: Double,
+        nSegment :: Int
+      }
   deriving (Show)
 
-data Planetary =
-  Planetary
-    { rOuter :: Double
-    , rSun :: Double
-    , rPlanet :: Double
-    , nPlanet :: Int
-    , planetOffset :: Double
-    }
+data Planetary
+  = Planetary
+      { rOuter :: Double,
+        rSun :: Double,
+        rPlanet :: Double,
+        nPlanet :: Int,
+        planetOffset :: Double
+      }
   deriving (Show)
 
 invol :: Double -> Double
@@ -59,7 +60,7 @@ tooth i rPitch =
   let rBase = baseRadius i rPitch
       alphaRef = invol (acos (rBase / rPitch))
       c = convex (involute i rPitch)
-      c' = rotate2d (-alphaRef) c
+      c' = rotate2d (- alphaRef) c
       pitch = pi * module' i
       theta = pitch / rPitch / 2
    in (\x -> hull [x, rotate2d theta $ mirror (V2 0 1) x]) # c'
@@ -70,10 +71,11 @@ gear i rPitch =
       theta = pitch / rPitch
       t = tooth i rPitch
       nTeeth = round (2 * rPitch / module' i) :: Int
-   in (\x ->
-         circle (rPitch - dedendum i) :
-         [rotate2d (theta * fromIntegral n) x | n <- [0 .. nTeeth - 1]]) ##
-      t
+   in ( \x ->
+          circle (rPitch - dedendum i)
+            : [rotate2d (theta * fromIntegral n) x | n <- [0 .. nTeeth - 1]]
+      )
+        ## t
 
 planetary :: (HasScad r) => Involute -> Planetary -> Double -> Sem r Form
 planetary i p height =
@@ -84,7 +86,7 @@ planetary i p height =
       rRing = rSun p + 2 * rPlanet p
       ring = circle (rOuter p) <-> gear i' rRing
       pitch = pi * module' i
-            -- beta: the angle of omega per tooth cycle
+      -- beta: the angle of omega per tooth cycle
       betaRing = pitch / rRing
       betaSun = pitch / rSun p -- betaPlanet == betaSun since meshed
       dRing_dOmega = 1 / betaRing
@@ -94,27 +96,40 @@ planetary i p height =
         let (_ :: Int, phaseRing) = properFraction (omega / betaRing)
             (_ :: Int, phasePlnt) = properFraction (parity - omega / betaSun)
             phasePlnt' =
-              if | phasePlnt < -0.5 -> phasePlnt + 1
-                 | phasePlnt >= 0.5 -> phasePlnt - 1
-                 | otherwise -> phasePlnt
+              if
+                | phasePlnt < -0.5 -> phasePlnt + 1
+                | phasePlnt >= 0.5 -> phasePlnt - 1
+                | otherwise -> phasePlnt
             delta = (phasePlnt' - phaseRing) / (dRing_dOmega + dSun_dOmega)
             omega' = omega + 1 * delta
-         in rotate' (V3 0 0 omega') .
-            translate (V3 (rPlanet p + rSun p) 0 0) .
-            herringbone (-1) (rPlanet p) .
-            rotate2d ((theta / 2) + (omega' * rSun p / rPlanet p))
-   in (\g ->
-         (herringbone (-1) rRing ring :
-          herringbone (1) (rSun p) sun :
-          [ planet (tau / fromIntegral (nPlanet p) * fromIntegral n) g
-          | n <- [0 .. nPlanet p - 1]
-          ])) ##
-      (mirror (V2 1 0) . offsetR (-planetOffset p) False $ gear i (rPlanet p))
+         in rotate' (V3 0 0 omega')
+              . translate (V3 (rPlanet p + rSun p) 0 0)
+              . herringbone (-1) (rPlanet p)
+              . rotate2d ((theta / 2) + (omega' * rSun p / rPlanet p))
+   in ( \g ->
+          herringbone (-1) rRing ring
+            : herringbone 1 (rSun p) sun
+            : [ planet (tau / fromIntegral (nPlanet p) * fromIntegral n) g
+                | n <- [0 .. nPlanet p - 1]
+              ]
+      )
+        ## ( mirror (V2 1 0) . offsetR (- planetOffset p) False $
+               gear
+                 i
+                 (rPlanet p)
+           )
   where
     herringbone :: (HasScad r) => Double -> Double -> Sem r Shape -> Sem r Form
     herringbone sgn r m =
       let eps = 1e-5
           height' = height + eps
-       in (\c -> [c, mirror (V3 0 0 1) c]) ##
-          (translate (V3 0 0 (-eps / 2)) $
-           linearExtrude (0.5 * height') False 10 (0.5 * sgn * height' / r) m)
+       in (\c -> [c, mirror (V3 0 0 1) c])
+            ## translate
+              (V3 0 0 (- eps / 2))
+              ( linearExtrude
+                  (0.5 * height')
+                  False
+                  10
+                  (0.5 * sgn * height' / r)
+                  m
+              )

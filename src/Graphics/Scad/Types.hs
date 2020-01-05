@@ -84,6 +84,10 @@ data Model d where
   Intersection' :: [Model d] -> Model d
   Difference :: Model d -> Model d -> Model d
 
+  Hidden :: Model d -> Model d
+  Debug :: Model d -> Model d
+  Background :: Model d -> Model d
+
   Apply2 :: Text -> Model 'Two -> Model d
   Apply3 :: Text -> Model 'Three -> Model d
   Children :: Model d
@@ -173,6 +177,10 @@ instance Pretty (Model 'Two) where
   pretty (Difference x (Union' ys)) = "difference()" <+> block (x : ys)
   pretty (Difference x y) = "difference()" <+> block [x, y]
 
+  pretty (Hidden x) = "*" <+> pretty x
+  pretty (Debug x) = "#" <+> pretty x
+  pretty (Background x) = "%" <+> pretty x
+
   pretty (Apply2 n m) = pretty n <> "()" <+> block [m]
   pretty (Apply3 n m) = pretty n <> "()" <+> block [m]
   pretty Children = "children();"
@@ -219,6 +227,10 @@ instance Pretty (Model 'Three) where
   pretty (Intersection' xs) = "intersection()" <+> block xs
   pretty (Difference x (Union' ys)) = "difference()" <+> block (x : ys)
   pretty (Difference x y) = "difference()" <+> block [x, y]
+
+  pretty (Hidden x) = "*" <+> pretty x
+  pretty (Debug x) = "#" <+>  pretty x
+  pretty (Background x) = "%" <+>  pretty x
 
   pretty (Apply2 n m) = pretty n <> "()" <+> block [m]
   pretty (Apply3 n m) = pretty n <> "()" <+> block [m]

@@ -32,6 +32,8 @@ module Graphics.Scad
   , tau
   , defaultFacet
   , render
+  , printScad
+  , writeScad
   , circle
   , square
   , square'
@@ -66,6 +68,9 @@ module Graphics.Scad
   , union
   , intersection
   , difference
+  , hidden
+  , debug
+  , background
   , fa
   , fs
   , fn
@@ -84,10 +89,12 @@ import Data.Text (Text)
 import Linear.V2 (V2(..))
 import Linear.V3 (V3(..))
 import Data.Text (pack)
-import Data.Text.Prettyprint.Doc (Pretty(..), Doc, vcat)
+import Data.Text.Prettyprint.Doc (Pretty(..), Doc, defaultLayoutOptions, layoutSmart, vcat)
+import Data.Text.Prettyprint.Doc.Render.Text (putDoc, renderIO)
 import Polysemy
 import Polysemy.Reader
 import Polysemy.State
+import System.IO (IOMode(WriteMode), withFile)
 
 
 type Shape = Model 'Two
@@ -110,6 +117,7 @@ defaultFacet :: Facet
 defaultFacet =
   Facet {_fa = Nothing, _fs = Nothing, _fn = Nothing, _slices = Nothing}
 
+
 render :: (Pretty (Model d)) => Model' d -> Doc ann
 render mdl =
   let (ts, m) = run . runState mempty $ runReader defaultFacet mdl
@@ -118,6 +126,14 @@ render mdl =
   where
     mkMod (Models2 m, n) = Module2 n m
     mkMod (Models3 m, n) = Module3 n m
+
+printScad :: Pretty (Model d) => Model' d -> IO ()
+printScad m = putDoc (render m)
+
+writeScad :: Pretty (Model d) => FilePath -> Model' d -> IO ()
+writeScad f m =
+  withFile f WriteMode
+    $ \h -> renderIO h . layoutSmart defaultLayoutOptions $ render m
 
 
 circle :: (Member (Reader Facet) r) => Double -> Sem r Shape
@@ -231,6 +247,16 @@ intersection ms = getIntersection . mconcat $ fmap Intersection ms
 
 difference :: (Applicative m) => m (Model d) -> [m (Model d)] -> m (Model d)
 difference x ys = liftA2 Difference x (union ys)
+
+
+hidden :: (Applicative m) => m (Model d) -> m (Model d)
+hidden x = Hidden <$> x
+
+debug :: (Applicative m) => m (Model d) -> m (Model d)
+debug x = Debug <$> x
+
+background :: (Applicative m) => m (Model d) -> m (Model d)
+background x = Background <$> x
 
 
 fa :: (Member (Reader Facet) r) => Double -> Sem r (Model d) -> Sem r (Model d)
